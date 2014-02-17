@@ -9,6 +9,8 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
+#define BUFF_SIZE 4096
+
 int connect_to_socket(const char* ip, struct sockaddr_in* dest, int port);
 int download_file(int socket, const char* filepath);
 int rem_headers(char *buffer);
@@ -80,7 +82,7 @@ int download_file(int socket, const char* filepath)
 	if (!file)
 		return 1;
 
-	char buffer[1024];
+	char buffer[BUFF_SIZE];
 	int size;
 	int init = 1;
 	int isinit = 1;
@@ -109,8 +111,7 @@ int download_file(int socket, const char* filepath)
 int rem_headers(char *buffer)
 {
 	int i;
-	int length = 4096;
-	for (i = 0; i < length; ++i) {
+	for (i = 0; i < BUFF_SIZE; ++i) {
 		if (buffer[i]=='\r' && buffer[i+1] == '\n' &&
 		    buffer[i+2]=='\r' && buffer[i+3] =='\n') 
 		{
