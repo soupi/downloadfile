@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/ipc.h>
-#include <ctypes.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -12,7 +11,7 @@
 
 int connect_to_socket(const char* ip, struct sockaddr_in* dest, int port);
 int download_file(int socket, const char* filepath);
-void rem_headers(char *buffer)
+int rem_headers(char *buffer);
 
 int main(int argc, char* argv[])
 {
@@ -25,19 +24,18 @@ int main(int argc, char* argv[])
 	struct hostent *h = gethostbyname(argv[1]);
 	char* ip = inet_ntoa(*((struct in_addr*)h->h_addr));
 
-	sockaddr_in dest;
+	struct sockaddr_in dest;
 	int my_socket;
-	if (my_socket = connect_to_socket(ip, &dest, 80))
+	if ((my_socket = connect_to_socket(ip, &dest, 80)) == -1)
 	{
 		perror("couldn't connect. ");
 		return 1;
 	}
-
 	puts("connected.");
 
-	if (download_file(my_socket, filepath))
+	if (download_file(my_socket, argv[2]))
 	{
-		puts("unable to download");
+		perror("unable to download");
 		return 1;
 	}
 	puts("download completed");
@@ -47,54 +45,80 @@ int main(int argc, char* argv[])
 
 int connect_to_socket(const char* ip, struct sockaddr_in* dest, int port)
 {
-	int my_socket = socket(AF_INET, SOCK_STREAM, NO_SOCK_FLAGS);
+	int my_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (my_socket < 0)
 	{
 		perror("socket allocation failed");
-		return 1;
+		return -1;
 	}
 	memset (dest, 0, sizeof(dest));
 	dest->sin_family = AF_INET;
 	dest->sin_port = htons(port);
 	dest->sin_addr.s_addr = inet_addr(ip);
 
-	connect(my_socket, (struct sockaddr*)dest, (socklen_t)sizeof(*dest));
-
+	if (connect(my_socket, (struct sockaddr*)dest, (socklen_t)sizeof(*dest)) == -1)
+		return -1;
 	return my_socket;
 }
 
 int download_file(int socket, const char* filepath)
 {
 	char buff[200];
-	strcpy(buff, "GET ");
+	strcpy(buff, "GET /");
 	strcat(buff, filepath);
-	strcat(buff, " HTTP1.1\n\n");
-	if (!send(socket, buff, strlen(buff), NO_FLAGS))
-		return 1;
+	strcat(buff, " HTTP/1.0\n\n");
+	char* bu = malloc(sizeof(char)*strlen(buff)+1);
+	strcat(bu, buff);
 	
+	if (send(socket, bu, strlen(bu), 0) < 1)
+	{
+		free(bu);
+		return 1;
+	}
+	free(bu);
 	FILE* file = fopen("download", "wb");
 	if (!file)
 		return 1;
 
-	char buffer[4096];
+	char buffer[1024];
 	int size;
-	int init = 0;
-	while ((size = recv(my_socket, buffer, sizeof(buffer)-1, NO_FLAGS)) > 0)
+	int init = 1;
+	int isinit = 1;
+	int cont = 1;
+	unsigned long total = 0;
+	
+	while (cont && ((size = recv(socket, buffer, sizeof(buffer)-1, 0)) > 0))
 	{
 		buffer[size] = 0;
-		if (!init) { rem_headers(buffer); init = 1; }
+		if (init) { size -= rem_headers(buffer); isinit = 0; }
+
+		if (!init && strstr(buffer, "\r\n\r\n") != NULL)
+		{
+			cont = 0;
+			size -= 8;
+		}		
 		fwrite(buffer, 1, size, file);
+		total += size;
+		init = isinit;
 	}
 	fclose(file);
+	printf("total size downloaded: %lu\n", total);
 	return 0;
 }
 
-void rem_headers(char *buffer)
+int rem_headers(char *buffer)
 {
 	int i;
+	int length = 4096;
 	for (i = 0; i < length; ++i) {
-		if (buffer[i]=='\r' && buffer[i+1] == 'n' && buffer[i+2]=='\r' && buffer[i+3] =='\n') 
-			{ i+=4; break }
+		if (buffer[i]=='\r' && buffer[i+1] == '\n' &&
+		    buffer[i+2]=='\r' && buffer[i+3] =='\n') 
+		{
+			i+=4; 
+			break; 
+		}
 	}
+
 	strcpy(buffer, &buffer[i]);
+	return i;
 }
